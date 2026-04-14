@@ -8,10 +8,12 @@ import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
 export class UserSchema extends BaseModel {
-  static $columns = ['createdAt', 'familyName', 'givenName', 'id', 'updatedAt'] as const
+  static $columns = ['createdAt', 'email', 'familyName', 'givenName', 'id', 'updatedAt'] as const
   $columns = UserSchema.$columns
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
+  @column()
+  declare email: string
   @column()
   declare familyName: string
   @column()

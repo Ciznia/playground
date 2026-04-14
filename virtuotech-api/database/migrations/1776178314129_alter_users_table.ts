@@ -5,7 +5,6 @@ export default class extends BaseSchema {
 
   async up() {
     this.schema.alterTable(this.tableName, (table) => {
-      table.dropColumn('email')
       table.dropColumn('password')
       table.dropColumn('full_name')
       table.string('family_name').notNullable()
@@ -16,7 +15,6 @@ export default class extends BaseSchema {
   async down() {
     this.schema.alterTable(this.tableName, (table) => {
       table.string('full_name').nullable()
-      table.string('email', 254).notNullable().unique()
       table.string('password').notNullable()
       table.dropColumn('family_name')
       table.dropColumn('given_name')
