@@ -11,7 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 
 import router from '@adonisjs/core/services/router'
+import openapi from '@foadonis/openapi/services/main'
 
+openapi.registerRoutes()
 router.get('/', () => {
   return { hello: 'world' }
 })
