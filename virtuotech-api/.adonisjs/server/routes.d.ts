@@ -7,6 +7,8 @@ export type ScannedRoutes = {
     'openapi.html': { paramsTuple?: []; params?: {} }
     'openapi.json': { paramsTuple?: []; params?: {} }
     'openapi.yaml': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_redirect': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_callback': { paramsTuple?: []; params?: {} }
     'auth.new_account.store': { paramsTuple?: []; params?: {} }
     'auth.access_token.store': { paramsTuple?: []; params?: {} }
     'auth.access_token.destroy': { paramsTuple?: []; params?: {} }
@@ -16,12 +18,16 @@ export type ScannedRoutes = {
     'openapi.html': { paramsTuple?: []; params?: {} }
     'openapi.json': { paramsTuple?: []; params?: {} }
     'openapi.yaml': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_redirect': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_callback': { paramsTuple?: []; params?: {} }
     'profile.profile.show': { paramsTuple?: []; params?: {} }
   }
   HEAD: {
     'openapi.html': { paramsTuple?: []; params?: {} }
     'openapi.json': { paramsTuple?: []; params?: {} }
     'openapi.yaml': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_redirect': { paramsTuple?: []; params?: {} }
+    'auth.google_oauth.google_callback': { paramsTuple?: []; params?: {} }
     'profile.profile.show': { paramsTuple?: []; params?: {} }
   }
   POST: {

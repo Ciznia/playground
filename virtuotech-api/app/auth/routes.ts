@@ -15,6 +15,12 @@ router
   .group(() => {
     router
       .group(() => {
+        router.group(() => {
+          router.get('/redirect', [controllers.auth.GoogleOauth, 'googleRedirect'])
+          router.get('/callback', [controllers.auth.GoogleOauth, 'googleCallback'])
+        })
+        .prefix('google')
+
         router.post('signup', [controllers.auth.NewAccount, 'store'])
         router.post('login', [controllers.auth.AccessToken, 'store'])
         router.post('logout', [controllers.auth.AccessToken, 'destroy']).use(middleware.auth())
