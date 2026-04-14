@@ -1,6 +1,4 @@
-import { indexEntities } from '@adonisjs/core'
 import { defineConfig } from '@adonisjs/core/app'
-import { generateRegistry } from '@tuyau/core/hooks'
 
 export default defineConfig({
   /*
@@ -106,12 +104,20 @@ export default defineConfig({
   */
   metaFiles: [],
 
+  /**
+   * Custom init hook replaces the default indexEntities() call.
+   * This is what generates .adonisjs/server/controllers.ts.
+  */
+
+  // hooks: {
+  //   init: [
+  //     indexEntities({
+  //       transformers: { enabled: true },
+  //     }),
+  //     generateRegistry(),
+  //   ],
+  // },
   hooks: {
-    init: [
-      indexEntities({
-        transformers: { enabled: true },
-      }),
-      generateRegistry(),
-    ],
+    init: [() => import('./hooks/init.ts')],
   },
 })

@@ -6,32 +6,27 @@
 | The routes file is used for defining the HTTP routes.
 |
 */
+import { glob } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import path from 'node:path'
 
-import { middleware } from '#start/kernel'
 import router from '@adonisjs/core/services/router'
-import { controllers } from '#generated/controllers'
 
 router.get('/', () => {
   return { hello: 'world' }
 })
 
-router
-  .group(() => {
-    router
-      .group(() => {
-        router.post('signup', [controllers.NewAccount, 'store'])
-        router.post('login', [controllers.AccessToken, 'store'])
-        router.post('logout', [controllers.AccessToken, 'destroy']).use(middleware.auth())
-      })
-      .prefix('auth')
-      .as('auth')
+// Resolves '#app/placeholder' → 'file:///project/app/placeholder.js'
+// then dirname strips the filename → '/project/app'
+const appDir = path.dirname(fileURLToPath(import.meta.resolve('#app/placeholder')))
 
-    router
-      .group(() => {
-        router.get('/profile', [controllers.Profile, 'show'])
-      })
-      .prefix('account')
-      .as('profile')
-      .use(middleware.auth())
-  })
-  .prefix('/api/v1')
+/**
+ * Detect whether we're running TypeScript source (dev, via AdonisJS JIT loader)
+ * or compiled JavaScript (production build). import.meta.url retains the .ts
+ * extension in dev because AdonisJS's loader hook preserves it.
+ */
+const ext = import.meta.url.split("?")[0].endsWith('.ts') ? 'ts' : 'js'
+
+for await (const routeFile of glob(`**/routes.${ext}`, { cwd: appDir })) {
+  await import(pathToFileURL(path.join(appDir, routeFile)).href)
+}
