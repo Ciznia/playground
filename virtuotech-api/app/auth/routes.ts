@@ -14,11 +14,12 @@ router
   .group(() => {
     router
       .group(() => {
-        router.group(() => {
-          router.get('/redirect', [controllers.auth.GoogleOauth, 'googleRedirect'])
-          router.get('/callback', [controllers.auth.GoogleOauth, 'googleCallback'])
-        })
-        .prefix('google')
+        router
+          .group(() => {
+            router.get('/redirect', [controllers.auth.GoogleOauth, 'googleRedirect'])
+            router.get('/callback', [controllers.auth.GoogleOauth, 'googleCallback'])
+          })
+          .prefix('google')
       })
       .prefix('auth')
   })

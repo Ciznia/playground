@@ -11,7 +11,7 @@ export default hooks.init((_parent, _hooksManager, indexGenerator) => {
        *   key   → relative path WITHOUT extension  e.g. 'modules/mail/controller/mail_controller'
        *   value → absolute file path               e.g. '/project/app/modules/mail/controller/mail_controller.ts'
        */
-      const controllerDirName: string = "controllers"
+      const controllerDirName: string = 'controllers'
       const files = vfs.asList()
       const tree: Record<string, unknown> = {}
 

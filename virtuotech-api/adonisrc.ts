@@ -52,7 +52,7 @@ export default defineConfig({
     () => import('@adonisjs/auth/auth_provider'),
     () => import('#providers/api_provider'),
     () => import('@adonisjs/ally/ally_provider'),
-    () => import('@foadonis/openapi/openapi_provider')
+    () => import('@foadonis/openapi/openapi_provider'),
   ],
 
   /*
@@ -108,7 +108,7 @@ export default defineConfig({
   /**
    * Custom init hook replaces the default indexEntities() call.
    * This is what generates .adonisjs/server/controllers.ts.
-  */
+   */
 
   // hooks: {
   //   init: [

@@ -4,7 +4,6 @@ import UserTransformer from '#app/auth/transformers/user_transformer'
 import User from '#app/auth/models/user'
 
 export default class GoogleOauthController {
-
   @ApiOperation({
     summary: 'Redirects the user to Google for authentication',
     tags: ['Authentication'],

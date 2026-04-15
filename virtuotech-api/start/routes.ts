@@ -27,7 +27,7 @@ const appDir = path.dirname(fileURLToPath(import.meta.resolve('#app/placeholder'
  * or compiled JavaScript (production build). import.meta.url retains the .ts
  * extension in dev because AdonisJS's loader hook preserves it.
  */
-const ext = import.meta.url.split("?")[0].endsWith('.ts') ? 'ts' : 'js'
+const ext = import.meta.url.split('?')[0].endsWith('.ts') ? 'ts' : 'js'
 
 for await (const routeFile of glob(`**/routes.${ext}`, { cwd: appDir })) {
   await import(pathToFileURL(path.join(appDir, routeFile)).href)
