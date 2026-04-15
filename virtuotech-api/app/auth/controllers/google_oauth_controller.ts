@@ -1,7 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import { ApiOperation, ApiResponse } from '@foadonis/openapi/decorators'
-import UserTransformer from '#app/auth/transformers/user_transformer'
-import User from '#app/auth/models/user'
+import GoogleOauthService from '#app/auth/services/google_oauth_service'
 
 export default class GoogleOauthController {
   @ApiOperation({
@@ -13,11 +12,7 @@ export default class GoogleOauthController {
     description: 'Redirects to Google OAuth consent screen',
   })
   async googleRedirect({ ally, session }: HttpContext) {
-    session.put('redirect.previousUrl', '/v2/auth/login')
-    return ally.use('google').redirect((request) => {
-      request.param('access_type', 'offline')
-      request.param('prompt', 'consent')
-    })
+    return GoogleOauthService.googleRedirect(ally, session)
   }
 
   @ApiOperation({
@@ -30,17 +25,6 @@ export default class GoogleOauthController {
     description: 'User authenticated successfully',
   })
   async googleCallback({ ally }: HttpContext) {
-    const google = ally.use('google')
-    const googleUser = await google.user()
-    const user = await User.firstOrCreate(
-      { email: googleUser.email },
-      {
-        email: googleUser.email,
-        givenName: googleUser.original.given_name,
-        familyName: googleUser.original.family_name,
-      }
-    )
-
-    return UserTransformer.transform(user)
+    return GoogleOauthService.googleCallback(ally)
   }
 }
