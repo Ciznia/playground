@@ -1,0 +1,24 @@
+FROM node:24-slim
+
+# ARGs are build-time; use only for non-secrets
+# Env configuration for non-secret values can be ovverridden at runtime using environment variables
+ARG TZ=UTC
+ARG PORT=3333
+ARG HOST=localhost
+ARG NODE_ENV=development
+ARG LOG_LEVEL=info
+ARG APP_URL=http://${HOST}:${PORT}
+ARG SESSION_DRIVER=cookie
+
+EXPOSE ${PORT}
+
+WORKDIR /app
+
+# Copy package manifests first then install dependencies
+COPY package.json package-lock.json ./
+RUN npm install
+
+
+# Copy all application files
+COPY . .
+CMD ["node", "ace", "serve", "--hmr"]
