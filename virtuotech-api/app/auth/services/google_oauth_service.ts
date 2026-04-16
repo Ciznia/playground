@@ -1,7 +1,7 @@
 import UserTransformer from '#app/auth/transformers/user_transformer'
 import User from '#app/auth/models/user'
-import { AllyService } from '@adonisjs/ally/types'
-import { Session } from '@adonisjs/session'
+import type { AllyService } from '@adonisjs/ally/types'
+import type { Session } from '@adonisjs/session'
 
 export default class GoogleOauthService {
   static async googleRedirect(ally: AllyService, session: Session) {
