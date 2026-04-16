@@ -6,19 +6,19 @@ Suivez les consignes indiquées dans [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ## Serveur de développement
 
-1. Aller dans le bon dossier
+### Aller dans le bon dossier
 
 ```sh
 cd virtuotech-api
 ```
 
-2. Installer les dependances
+### Installer les dependances
 
 ```sh
 npm i
 ```
 
-3. Configuration du .env
+### Configuration du .env
 
 - Valeur initiale du .env
 
@@ -29,7 +29,7 @@ node ace generate:key
 
 - initialiser les secrets oauth google: [la documentation pour](https://developers.google.com/identity/protocols/oauth2)
 
-4. lancer le serveur de dev
+### Lancer le serveur de dev
 
 - sur l'hôte:
 
@@ -39,13 +39,13 @@ node ace serve --hmr
 
 - avec docker:
 
-1. build l'image
+#### Build l'image
 
 ```sh
 docker build -t virtuoos-backend-v2 -f ./Dockerfile.dev .
 ```
 
-2. lancer le serveur
+#### Lancer le container
 
 - sans hot reload
 
