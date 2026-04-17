@@ -48,6 +48,9 @@ jobs:
 
   verify-pr-metadata:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     defaults:
       run:
         shell: bash
@@ -70,31 +73,100 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate PR commits with commitlint
-        if: github.event_name == 'pull_request'
-        run: npx --no-install commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
-
-      - name: Validate PR title with commitlint
-        env:
-          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
-        run: echo "$GITHUB_PR_TITLE" | npx --no-install commitlint --verbose
-
-      - name: Validate PR body length
+      - name: PR Quality Bot
         uses: actions/github-script@v7
         with:
           script: |
-            const body = context.payload.pull_request.body || '';
+            const { execSync } = require('child_process');
+            const cwd = `${process.env.GITHUB_WORKSPACE}/virtuotech-api`;
 
-            const trimmed = body.trim();
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = pr.number;
 
-            if (!trimmed) {
-              core.setFailed('PR body is required and cannot be empty.');
-              return;
+            const marker = '<!-- pr-quality-bot -->';
+
+            let errors = [];
+            let warnings = [];
+
+            // -------------------------
+            // Validate PR title
+            // -------------------------
+            try {
+              execSync(
+                `echo ${JSON.stringify(pr.title)} | npx --no-install commitlint`,
+                { stdio: 'pipe', cwd }
+              );
+            } catch (e) {
+              errors.push(`### PR title error\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
             }
 
-            if (trimmed.length < 50) {
-              core.setFailed(`PR body must be at least 50 characters (currently ${trimmed.length}).`);
-              return;
+            // -------------------------
+            // Validate commits
+            // -------------------------
+            try {
+              execSync(
+                `npx --no-install commitlint --from ${pr.base.sha} --to ${pr.head.sha}`,
+                { stdio: 'pipe', cwd }
+              );
+            } catch (e) {
+              errors.push(`### PR commit names error\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
             }
 
-            core.info(`PR body length is valid (${trimmed.length} characters).`);
+            // -------------------------
+            // Validate PR body
+            // ------------------------
+            const body = (pr.body || '').trim();
+            const minLength = 50;
+
+            if (!body) {
+              errors.push('### PR body is required');
+            } else if (body.length < minLength) {
+              errors.push(`### PR body too short\n\n(${body.length}/${minLength} characters)`);
+            }
+
+            // -------------------------
+            // Build message
+            // -------------------------
+            let message = `${marker}\n`;
+
+            if (errors.length === 0) {
+              message += `# PR Quality Check Passed\n\nEverything looks good`;
+            } else {
+              message += `# PR Quality Check Failed\n\n`;
+              message += `## Errors\n\n`;
+              message += errors.join('\n') + '\n\n';
+              message += `## Requirements\n`;
+              message += `- Title must follow commitlint convention\n`;
+              message += `- All commits must follow commitlint\n`;
+              message += `- PR body must be at least ${minLength} characters\n`;
+            }
+
+            // -------------------------
+            // Submit review
+            // -------------------------
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number,
+            });
+
+            const existing = reviews
+              .filter(r => r.user.type === 'Bot')
+              .reverse()
+              .find(r => r.body && r.body.includes(marker));
+
+            const event = errors.length === 0 ? 'APPROVE' : 'REQUEST_CHANGES';
+
+            await github.rest.pulls.createReview({
+              owner,
+              repo,
+              pull_number,
+              body: message,
+              event,
+            });
+
+            if (errors.length > 0) {
+              core.setFailed('PR quality checks failed');
+            }
