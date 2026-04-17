@@ -73,3 +73,8 @@ jobs:
       - name: Validate PR commits with commitlint
         if: github.event_name == 'pull_request'
         run: npx --no-install commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+      - name: Validate PR title with commitlint
+        env:
+          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$GITHUB_PR_TITLE" | npx --no-install commitlint --verbose
