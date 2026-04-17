@@ -78,3 +78,23 @@ jobs:
         env:
           GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
         run: echo "$GITHUB_PR_TITLE" | npx --no-install commitlint --verbose
+
+      - name: Validate PR body length
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+
+            const trimmed = body.trim();
+
+            if (!trimmed) {
+              core.setFailed('PR body is required and cannot be empty.');
+              return;
+            }
+
+            if (trimmed.length < 50) {
+              core.setFailed(`PR body must be at least 50 characters (currently ${trimmed.length}).`);
+              return;
+            }
+
+            core.info(`PR body length is valid (${trimmed.length} characters).`);
