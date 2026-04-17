@@ -2,7 +2,6 @@ name: verify pr definition
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
-  workflow_dispatch:
 
 jobs:
   verify-code-guidelines:
@@ -46,3 +45,32 @@ jobs:
 
       - name: verify ${{ matrix.actions.name }}
         run: npm run ${{ matrix.actions.command }}
+
+  verify-pr-metadata:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./virtuotech-api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          package-manager-cache: true
+          cache-dependency-path: "./virtuotech-api/package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate PR commits with commitlint
+        if: github.event_name == 'pull_request'
+        run: npx --no-install commitlint --from ${{ github.event.pull_request.base.sha }} \
+          --to ${{ github.event.pull_request.head.sha }} --verbose
