@@ -10,13 +10,13 @@ export default {
           if (!scope) {
             return [
               false,
-              'Scope is required and must match "[VS-<number>] <description>"',
+              'Scope is required and must match "[VS-<number>]"',
             ];
           }
 
           return [
             regex.test(scope),
-            'Scope must match the pattern "[VS-<number>] <description>" (e.g., "[VS-123] add-login")',
+            'Scope must match the pattern "[VS-<number>]" (e.g., "[VS-123]")',
           ];
         },
 
