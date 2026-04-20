@@ -16,8 +16,6 @@ jobs:
         actions:
           - name: lint
             command: "lint"
-          - name: test
-            command: "test"
           - name: format
             command: "format -- --check"
           - name: build
@@ -45,6 +43,39 @@ jobs:
 
       - name: verify ${{ matrix.actions.name }}
         run: npm run ${{ matrix.actions.command }}
+
+  verify-code-coverage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./virtuotech-api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          package-manager-cache: true
+          cache-dependency-path: "./virtuotech-api/package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test -- --coverage
+
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   verify-pr-metadata:
     runs-on: ubuntu-latest
