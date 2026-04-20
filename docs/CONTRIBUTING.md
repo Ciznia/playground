@@ -4,6 +4,10 @@
 
 Suivez les consignes indiquées dans [ARCHITECTURE.md](./ARCHITECTURE.md)
 
+## Inititialisation des outils
+
+- precommit: `git config core.hooksPath .husky` et [avoir installer les dependences](./CONTRIBUTING.md#installer-les-dependances)
+
 ## Serveur de développement
 
 ### Aller dans le bon dossier
