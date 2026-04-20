@@ -1,1 +1,3 @@
-.cache
+# IDE files
+.idea
+.vscode
