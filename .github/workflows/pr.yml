@@ -390,7 +390,7 @@ jobs:
               .filter(r => r.user.type === 'Bot' && r.body?.includes(MARKER))
               .reverse()[0];
 
-            if (previous && previous.state !== 'DISMISSED') {
+            if (previous && ['APPROVED', 'CHANGES_REQUESTED'].includes(previous.state)) {
               await github.rest.pulls.dismissReview({
                 owner, repo, pull_number,
                 review_id: previous.id,
