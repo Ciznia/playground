@@ -75,6 +75,7 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./virtuotech-api/coverage/lcov.info
 
   verify-pr-metadata:
     runs-on: ubuntu-latest

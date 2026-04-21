@@ -1,3 +1,11 @@
 {
-  "exclude": [".adonisjs/**", "tests/**", "database/schema.ts"]
+  "reporter": [
+    "text",
+    "lcov"
+  ],
+  "exclude": [
+    ".adonisjs/**",
+    "tests/**",
+    "database/schema.ts"
+  ]
 }
