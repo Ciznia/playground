@@ -1,7 +1,3 @@
-codecov:
-  require_ci_to_pass: true
-
-
 comment:
   layout: "reach, diff, flags, files"
   behavior: default
