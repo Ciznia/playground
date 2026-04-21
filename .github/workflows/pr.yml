@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: verify ${{ matrix.actions.name }}
+      - name: Verify ${{ matrix.actions.name }}
         run: npm run ${{ matrix.actions.command }}
 
   verify-code-coverage:
@@ -71,7 +71,6 @@ jobs:
       - name: Run tests with coverage
         run: npm run test
 
-
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -80,8 +79,9 @@ jobs:
   verify-pr-metadata:
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
       contents: read
+    outputs:
+      errors: ${{ steps.validate.outputs.errors }}
     defaults:
       run:
         shell: bash
@@ -104,7 +104,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: PR Quality Bot
+      - name: Validate PR metadata
+        id: validate
         uses: actions/github-script@v7
         with:
           script: |
@@ -112,14 +113,8 @@ jobs:
             const cwd = `${process.env.GITHUB_WORKSPACE}/virtuotech-api`;
 
             const pr = context.payload.pull_request;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pull_number = pr.number;
-
-            const marker = '<!-- pr-quality-bot -->';
 
             let errors = [];
-            let warnings = [];
 
             // -------------------------
             // Validate PR title
@@ -130,7 +125,7 @@ jobs:
                 { stdio: 'pipe', cwd }
               );
             } catch (e) {
-              errors.push(`### PR title error\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
+              errors.push(`### PR title does not follow commitlint convention\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
             }
 
             // -------------------------
@@ -142,12 +137,12 @@ jobs:
                 { stdio: 'pipe', cwd }
               );
             } catch (e) {
-              errors.push(`### PR commit names error\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
+              errors.push(`### One or more commits do not follow commitlint convention\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
             }
 
             // -------------------------
             // Validate PR body
-            // ------------------------
+            // -------------------------
             const body = (pr.body || '').trim();
             const minLength = 50;
 
@@ -157,25 +152,146 @@ jobs:
               errors.push(`### PR body too short\n\n(${body.length}/${minLength} characters)`);
             }
 
+            // Expose errors as a job output so post-review can consume them
+            core.setOutput('errors', JSON.stringify(errors));
+
+            if (errors.length > 0) {
+              core.setFailed('PR metadata validation failed');
+            }
+
+  post-review:
+    needs: [verify-code-guidelines, verify-code-coverage, verify-pr-metadata]
+    # Always run so we can post a review even when upstream jobs fail
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      statuses: read
+    steps:
+      - name: Post PR quality review
+        uses: actions/github-script@v7
+        env:
+          GUIDELINES_RESULT: ${{ needs.verify-code-guidelines.result }}
+          COVERAGE_RESULT: ${{ needs.verify-code-coverage.result }}
+          METADATA_ERRORS: ${{ needs.verify-pr-metadata.outputs.errors }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const pull_number = pr.number;
+            const sha = pr.head.sha;
+            const marker = '<!-- pr-quality-bot -->';
+
+            let errors = [];
+
             // -------------------------
-            // Build message
+            // Code guidelines (matrix)
+            // -------------------------
+            if (process.env.GUIDELINES_RESULT === 'failure') {
+              errors.push(
+                '### Code guidelines failed\n\n' +
+                'One or more of lint, format, build, or typecheck failed. ' +
+                'Check the CI logs for details.'
+              );
+            }
+
+            // -------------------------
+            // Test coverage
+            // -------------------------
+            if (process.env.COVERAGE_RESULT === 'failure') {
+              errors.push(
+                '### Tests failed\n\n' +
+                'The test suite did not pass. Check the CI logs for details.'
+              );
+            }
+
+            // -------------------------
+            // PR metadata
+            // -------------------------
+            try {
+              const metadataErrors = JSON.parse(process.env.METADATA_ERRORS || '[]');
+              errors.push(...metadataErrors);
+            } catch (_) {
+              errors.push('### PR metadata check output could not be read');
+            }
+
+            // -------------------------
+            // Poll Codecov statuses
+            // Codecov posts its results asynchronously after the upload,
+            // so we poll the GitHub combined status endpoint every 10s
+            // for up to 5 minutes (30 attempts).
+            // -------------------------
+            const codecovContexts = ['codecov/project', 'codecov/patch'];
+            const maxAttempts = 30;
+            const intervalMs = 10_000;
+            let codecovTimedOut = false;
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              const { data } = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref: sha,
+              });
+
+              const relevant = data.statuses.filter(s =>
+                codecovContexts.includes(s.context)
+              );
+              const allPresent = codecovContexts.every(ctx =>
+                relevant.some(s => s.context === ctx)
+              );
+              const anyPending = relevant.some(s => s.state === 'pending');
+
+              if (allPresent && !anyPending) {
+                const failed = relevant.filter(
+                  s => s.state === 'failure' || s.state === 'error'
+                );
+                for (const s of failed) {
+                  errors.push(
+                    `### Codecov check failed: \`${s.context}\`\n\n` +
+                    (s.description || 'Coverage threshold not met.')
+                  );
+                }
+                break;
+              }
+
+              if (attempt === maxAttempts - 1) {
+                codecovTimedOut = true;
+              } else {
+                await new Promise(r => setTimeout(r, intervalMs));
+              }
+            }
+
+            if (codecovTimedOut) {
+              errors.push(
+                '### Codecov status timed out\n\n' +
+                'Codecov did not report its result within 5 minutes. ' +
+                'Please check Codecov directly.'
+              );
+            }
+
+            // -------------------------
+            // Build review message
             // -------------------------
             let message = `${marker}\n`;
 
             if (errors.length === 0) {
-              message += `# PR Quality Check Passed\n\nEverything looks good`;
+              message += `# ✅ PR Quality Check Passed\n\nEverything looks good.`;
             } else {
-              message += `# PR Quality Check Failed\n\n`;
+              message += `# ❌ PR Quality Check Failed\n\n`;
               message += `## Errors\n\n`;
-              message += errors.join('\n') + '\n\n';
+              message += errors.join('\n\n') + '\n\n';
               message += `## Requirements\n`;
-              message += `- Title must follow commitlint convention\n`;
-              message += `- All commits must follow commitlint\n`;
-              message += `- PR body must be at least ${minLength} characters\n`;
+              message += `- All code checks must pass (lint, format, build, typecheck)\n`;
+              message += `- Tests must pass\n`;
+              message += `- Codecov \`project\` and \`patch\` checks must pass\n`;
+              message += `- PR title must follow commitlint convention\n`;
+              message += `- All commits must follow commitlint convention\n`;
+              message += `- PR body must be at least 50 characters\n`;
             }
 
             // -------------------------
-            // Submit review
+            // Dismiss previous bot review
             // -------------------------
             const { data: reviews } = await github.rest.pulls.listReviews({
               owner,
@@ -184,10 +300,22 @@ jobs:
             });
 
             const existing = reviews
-              .filter(r => r.user.type === 'Bot')
-              .reverse()
-              .find(r => r.body && r.body.includes(marker));
+              .filter(r => r.user.type === 'Bot' && r.body?.includes(marker))
+              .reverse()[0];
 
+            if (existing && existing.state !== 'DISMISSED') {
+              await github.rest.pulls.dismissReview({
+                owner,
+                repo,
+                pull_number,
+                review_id: existing.id,
+                message: 'Superseded by a new quality check.',
+              });
+            }
+
+            // -------------------------
+            // Post new review
+            // -------------------------
             const event = errors.length === 0 ? 'APPROVE' : 'REQUEST_CHANGES';
 
             await github.rest.pulls.createReview({
