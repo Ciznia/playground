@@ -1,18 +1,17 @@
 name: Update PR Codecov Review
 
-# Fires whenever a GitHub status is posted on any commit.
-# We filter to codecov/ contexts in the job condition.
 on:
-  status:
+  workflow_run:
+    workflows: ["Verify PR Definition"]
+    types: [completed]
 
 jobs:
   update-codecov-section:
-    # Only proceed for Codecov status events
-    if: startsWith(github.event.context, 'codecov/')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      statuses: read
+      actions: read
+
     steps:
       - name: Update Codecov section and re-post review
         uses: actions/github-script@v9
@@ -20,141 +19,128 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo  = context.repo.repo;
-            const sha   = context.payload.commit.sha;
+
+            const run = context.payload.workflow_run;
+            const sha = run.head_sha;
 
             const MARKER        = '<!-- pr-quality-bot -->';
             const CODECOV_START = '<!-- codecov-section-start -->';
             const CODECOV_END   = '<!-- codecov-section-end -->';
             const CODECOV_CTXS  = ['codecov/project', 'codecov/patch'];
 
-            // ── Find the open PR for this commit ─────────────────────────────
             const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner, repo, commit_sha: sha,
+              owner,
+              repo,
+              commit_sha: sha,
             });
+
             const pr = prs.find(p => p.state === 'open');
 
             if (!pr) {
-              core.info('No open PR associated with this commit. Skipping.');
+              core.info(`No open PR for SHA ${sha}`);
               return;
             }
 
             const pull_number = pr.number;
 
-            // ── Find the existing bot review ──────────────────────────────────
-            // Retry a few times: post-review might still be running when the
-            // Codecov status fires, so the review might not exist yet.
-            let existing;
-            for (let attempt = 0; attempt < 3; attempt++) {
-              const { data: reviews } = await github.rest.pulls.listReviews({ owner, repo, pull_number });
-              existing = reviews
-                .filter(r => r.user.type === 'Bot' && r.body?.includes(MARKER))
-                .reverse()[0];
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number,
+            });
 
-              if (existing) break;
-              core.info(`Bot review not found yet (attempt ${attempt + 1}/3). Waiting 15s...`);
-              if (attempt < 2) await new Promise(r => setTimeout(r, 20_000));
-            }
+            const existing = reviews
+              .filter(r => r.user.type === 'Bot' && r.body?.includes(MARKER))
+              .reverse()[0];
 
             if (!existing) {
-              core.info('No existing bot review found after retries. Skipping.');
+              core.info("No bot review found");
               return;
             }
 
-            // ── Guard against stale status events from superseded pushes ──────
-            // post-review embeds <!-- pr-sha: {sha} --> so we can verify this
-            // status event is actually for the commit the review was built from.
-            const shaMatch = existing.body.match(/<!-- pr-sha: ([a-f0-9]+) -->/);
-            if (!shaMatch || shaMatch[1] !== sha) {
-              core.info(
-                `Review was built for commit ${shaMatch?.[1] ?? 'unknown'}, ` +
-                `but this status is for ${sha}. Skipping stale event.`
-              );
+            const { data: checks } = await github.rest.checks.listForRef({
+              owner,
+              repo,
+              ref: sha,
+            });
+
+            const codecov = checks.check_runs.filter(c =>
+              CODECOV_CTXS.includes(c.name)
+            );
+
+            if (!codecov.length) {
+              core.info("No Codecov check runs found yet");
               return;
             }
 
-            // ── Wait for both Codecov statuses to settle ──────────────────────
-            // The status event fires once per context (project OR patch), so the
-            // sibling context might still be pending. We do a short retry loop
-            // instead of the original 5-minute polling.
-            let codecovStatuses = [];
+            // ---------------------------------------------
+            // Build Codecov section
+            // ---------------------------------------------
+            const fmt = name => {
+              const c = codecov.find(x => x.name === name);
+              if (!c) return `⚠️ \`${name}\``;
 
-            for (let attempt = 0; attempt < 6; attempt++) {
-              const { data } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
-              const relevant   = data.statuses.filter(s => CODECOV_CTXS.includes(s.context));
-              const allPresent = CODECOV_CTXS.every(ctx => relevant.some(s => s.context === ctx));
-              const anyPending = relevant.some(s => s.state === 'pending');
+              const icon =
+                c.conclusion === 'success' ? '✅' :
+                c.conclusion === 'failure' ? '❌' :
+                '⏳';
 
-              if (allPresent && !anyPending) {
-                codecovStatuses = relevant;
-                break;
-              }
-
-              core.info(`Waiting for both Codecov statuses to settle (attempt ${attempt + 1}/6)...`);
-              if (attempt < 5) await new Promise(r => setTimeout(r, 10_000));
-            }
-
-            // ── Build the updated Codecov section ─────────────────────────────
-            const fmtStatus = ctx => {
-              const s = codecovStatuses.find(s => s.context === ctx);
-              if (!s) return `⚠️ \`${ctx}\` (not reported after retries)`;
-              const icon = { success: '✅', pending: '⏳', failure: '❌', error: '❌' }[s.state] ?? '⚠️';
-              return `${icon} \`${ctx}\``;
+              return `${icon} \`${name}\``;
             };
 
-            const codecovErrors = codecovStatuses
-              .filter(s => s.state === 'failure' || s.state === 'error')
-              .map(s => `- \`${s.context}\`: ${s.description || 'Coverage threshold not met.'}`)
+            const errors = codecov
+              .filter(c => c.conclusion === 'failure')
+              .map(c => `- \`${c.name}\`: ${c.output?.summary || 'Failed'}`)
               .join('\n');
 
-            const newCodecovSection = [
+            const newSection = [
               CODECOV_START,
               '## 📊 Codecov',
               '',
               '### Requirements',
               '',
-              fmtStatus('codecov/project'),
-              fmtStatus('codecov/patch'),
+              fmt('codecov/project'),
+              fmt('codecov/patch'),
               '',
               '### Errors',
               '',
-              codecovErrors || '_No errors_',
+              errors || '_No errors_',
               CODECOV_END,
             ].join('\n');
 
-            // ── Splice the new section into the existing review body ───────────
-            const startIdx = existing.body.indexOf(CODECOV_START);
-            const endIdx   = existing.body.indexOf(CODECOV_END);
+            // ---------------------------------------------
+            // Patch review body
+            // ---------------------------------------------
+            const start = existing.body.indexOf(CODECOV_START);
+            const end   = existing.body.indexOf(CODECOV_END);
 
-            if (startIdx === -1 || endIdx === -1) {
-              core.warning('Codecov section markers not found in existing review. Skipping.');
+            if (start === -1 || end === -1) {
+              core.warning("Codecov section not found");
               return;
             }
 
-            const splicedBody =
-              existing.body.slice(0, startIdx) +
-              newCodecovSection +
-              existing.body.slice(endIdx + CODECOV_END.length);
+            const updated =
+              existing.body.slice(0, start) +
+              newSection +
+              existing.body.slice(end + CODECOV_END.length);
 
-            // ── Determine overall pass / fail ─────────────────────────────────
-            // Strip all HTML comments (markers) to avoid false positives in the scan.
-            const bodyText     = splicedBody.replace(/<!--[\s\S]*?-->/g, '');
-            const overallPassed = !bodyText.includes('❌') && !bodyText.includes('⚠️');
+            // ---------------------------------------------
+            // Update review
+            // ---------------------------------------------
+            const bodyText = updated.replace(/<!--[\s\S]*?-->/g, '');
+            const ok = !bodyText.includes('❌');
 
-            // ── Update the top-level header icon ─────────────────────────────
-            const finalBody = splicedBody.replace(
+            const finalBody = updated.replace(
               /^# [⏳✅❌] PR Validation Status/m,
-              `# ${overallPassed ? '✅' : '❌'} PR Validation Status`
+              `# ${ok ? '✅' : '❌'} PR Validation Status`
             );
 
-            // ── Dismiss previous review ───────────────────────────────────────
-            if (['APPROVED', 'CHANGES_REQUESTED'].includes(existing.state)) {
-              await github.rest.pulls.dismissReview({
-                owner, repo, pull_number,
-                review_id: existing.id,
-                message: 'Superseded by Codecov results.',
-              });
-            }
+            const event = ok ? 'APPROVE' : 'REQUEST_CHANGES';
 
-            // ── Post updated review ───────────────────────────────────────────
-            const event = overallPassed ? 'APPROVE' : 'REQUEST_CHANGES';
-            await github.rest.pulls.createReview({ owner, repo, pull_number, body: finalBody, event });
+            await github.rest.pulls.createReview({
+              owner,
+              repo,
+              pull_number,
+              body: finalBody,
+              event
+            });
