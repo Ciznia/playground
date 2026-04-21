@@ -1,9 +1,14 @@
-name: verify pr definition
+name: Verify PR Definition
+
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
 jobs:
+  # -----------------------------------------------------------------------------
+  # Run lint / format / build / typecheck in parallel.
+  # Each leg uploads a one-line artifact so post-review can show per-check status
+  # -----------------------------------------------------------------------------
   verify-code-guidelines:
     runs-on: ubuntu-latest
     defaults:
@@ -13,16 +18,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        actions:
+        action:
           - name: lint
-            command: "lint"
+            command: lint
           - name: format
             command: "format -- --check"
           - name: build
-            command: "build"
+            command: build
           - name: typecheck
-            command: "typecheck"
-
+            command: typecheck
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -34,16 +38,34 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: "npm"
+          cache: npm
           package-manager-cache: true
-          cache-dependency-path: "./virtuotech-api/package-lock.json"
+          cache-dependency-path: ./virtuotech-api/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify ${{ matrix.actions.name }}
-        run: npm run ${{ matrix.actions.command }}
+      - name: Run ${{ matrix.action.name }}
+        id: check
+        run: npm run ${{ matrix.action.command }}
 
+      # Write "success" or "failure" so post-review can read per-check outcomes.
+      - name: Save result
+        if: always()
+        run: echo "${{ steps.check.outcome }}" > /tmp/check-result.txt
+
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guidelines-${{ matrix.action.name }}
+          path: /tmp/check-result.txt
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # Run the test suite and push coverage to Codecov.
+  # Builds its own review section so post-review only needs to read a file.
+  # -----------------------------------------------------------------------------
   verify-code-coverage:
     runs-on: ubuntu-latest
     defaults:
@@ -61,28 +83,61 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: "npm"
+          cache: npm
           package-manager-cache: true
-          cache-dependency-path: "./virtuotech-api/package-lock.json"
+          cache-dependency-path: ./virtuotech-api/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run tests with coverage
+        id: tests
         run: npm run test
 
       - name: Upload results to Codecov
+        if: always()
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./virtuotech-api/coverage/lcov.info
 
+      - name: Build section
+        if: always()
+        run: |
+          outcome="${{ steps.tests.outcome }}"
+          icon=$([ "$outcome" = "success" ] && echo "✅" || echo "❌")
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          {
+            echo "## 🧪 Tests"
+            echo ""
+            echo "### Requirements"
+            echo ""
+            echo "${icon} Test suite passes"
+            echo ""
+            echo "### Errors"
+            echo ""
+            if [ "$outcome" = "success" ]; then
+              echo "_No errors_"
+            else
+              echo "Test suite failed. Check the [CI logs](${run_url}) for details."
+            fi
+          } > /tmp/section-tests.md
+
+      - name: Upload section artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: section-tests
+          path: /tmp/section-tests.md
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # Validate PR title, commits, and body via commitlint.
+  # Builds its own review section so post-review only needs to read a file.
+  # -----------------------------------------------------------------------------
   verify-pr-metadata:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      errors: ${{ steps.validate.outputs.errors }}
     defaults:
       run:
         shell: bash
@@ -98,235 +153,258 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: "npm"
+          cache: npm
           package-manager-cache: true
-          cache-dependency-path: "./virtuotech-api/package-lock.json"
+          cache-dependency-path: ./virtuotech-api/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate PR metadata
+      - name: Validate PR metadata and build section
         id: validate
         uses: actions/github-script@v9
         with:
           script: |
             const { execSync } = require('child_process');
+            const fs  = require('fs');
             const cwd = `${process.env.GITHUB_WORKSPACE}/virtuotech-api`;
+            const pr  = context.payload.pull_request;
 
-            const pr = context.payload.pull_request;
+            const checks = [
+              { key: 'title',   label: 'PR title follows commitlint convention',   passed: false },
+              { key: 'commits', label: 'All commits follow commitlint convention', passed: false },
+              { key: 'body',    label: 'PR body is at least 50 characters',        passed: false },
+            ];
+            const errors = [];
 
-            let errors = [];
-
-            // -------------------------
-            // Validate PR title
-            // -------------------------
+            // --- Validate PR title ---
             try {
               execSync(
                 `echo ${JSON.stringify(pr.title)} | npx --no-install commitlint`,
                 { stdio: 'pipe', cwd }
               );
+              checks.find(c => c.key === 'title').passed = true;
             } catch (e) {
-              errors.push(`### PR title does not follow commitlint convention\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
+              errors.push(
+                '**PR title does not follow commitlint convention**\n\n' +
+                '```\n' + (e.stdout?.toString().trim() || e.message) + '\n```'
+              );
             }
 
-            // -------------------------
-            // Validate commits
-            // -------------------------
+            // --- Validate commits ---
             try {
               execSync(
                 `npx --no-install commitlint --from ${pr.base.sha} --to ${pr.head.sha}`,
                 { stdio: 'pipe', cwd }
               );
+              checks.find(c => c.key === 'commits').passed = true;
             } catch (e) {
-              errors.push(`### One or more commits do not follow commitlint convention\n\n\`\`\`\n${e.stdout?.toString() || e.message}\n\`\`\``);
+              errors.push(
+                '**One or more commits do not follow commitlint convention**\n\n' +
+                '```\n' + (e.stdout?.toString().trim() || e.message) + '\n```'
+              );
             }
 
-            // -------------------------
-            // Validate PR body
-            // -------------------------
-            const body = (pr.body || '').trim();
+            // --- Validate PR body ---
+            const body      = (pr.body || '').trim();
             const minLength = 50;
 
-            if (!body) {
-              errors.push('### PR body is required');
-            } else if (body.length < minLength) {
-              errors.push(`### PR body too short\n\n(${body.length}/${minLength} characters)`);
+            if (body.length >= minLength) {
+              checks.find(c => c.key === 'body').passed = true;
+            } else if (!body) {
+              errors.push('**PR body is required**');
+            } else {
+              errors.push(`**PR body is too short** (${body.length}/${minLength} characters)`);
             }
 
-            // Expose errors as a job output so post-review can consume them
-            core.setOutput('errors', JSON.stringify(errors));
+            // --- Build section ---
+            const requirements = checks
+              .map(c => `${c.passed ? '✅' : '❌'} ${c.label}`)
+              .join('\n');
+
+            const errorsBlock = errors.length > 0
+              ? errors.join('\n\n')
+              : '_No errors_';
+
+            const section = [
+              '## 📋 PR Metadata',
+              '',
+              '### Requirements',
+              '',
+              requirements,
+              '',
+              '### Errors',
+              '',
+              errorsBlock,
+            ].join('\n');
+
+            fs.writeFileSync('/tmp/section-metadata.md', section);
 
             if (errors.length > 0) {
               core.setFailed('PR metadata validation failed');
             }
 
+      - name: Upload section artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: section-metadata
+          path: /tmp/section-metadata.md
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # Download all section artifacts, assemble the full review, and post it.
+  # Codecov is always a placeholder here; pr-codecov-review.yml fills it in
+  # once Codecov posts its status event.
+  # -----------------------------------------------------------------------------
   post-review:
     needs: [verify-code-guidelines, verify-code-coverage, verify-pr-metadata]
-    # Always run so we can post a review even when upstream jobs fail
     if: always()
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      statuses: read
     steps:
-      - name: Post PR quality review
-        uses: actions/github-script@v7
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/artifacts
+
+      - name: Assemble and post review
+        uses: actions/github-script@v9
         env:
-          GUIDELINES_RESULT: ${{ needs.verify-code-guidelines.result }}
           COVERAGE_RESULT: ${{ needs.verify-code-coverage.result }}
-          METADATA_ERRORS: ${{ needs.verify-pr-metadata.outputs.errors }}
+          METADATA_RESULT: ${{ needs.verify-pr-metadata.result }}
         with:
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pr = context.payload.pull_request;
+            const fs   = require('fs');
+            const path = require('path');
+
+            const owner       = context.repo.owner;
+            const repo        = context.repo.repo;
+            const pr          = context.payload.pull_request;
             const pull_number = pr.number;
-            const sha = pr.head.sha;
-            const marker = '<!-- pr-quality-bot -->';
+            const runUrl      = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
 
-            let errors = [];
+            // Stable markers used by pr-codecov-review.yml for section replacement
+            const MARKER        = '<!-- pr-quality-bot -->';
+            const SHA_MARKER    = `<!-- pr-sha: ${pr.head.sha} -->`;
+            const CODECOV_START = '<!-- codecov-section-start -->';
+            const CODECOV_END   = '<!-- codecov-section-end -->';
 
-            // -------------------------
-            // Code guidelines (matrix)
-            // -------------------------
-            if (process.env.GUIDELINES_RESULT === 'failure') {
-              errors.push(
-                '### Code guidelines failed\n\n' +
-                'One or more of lint, format, build, or typecheck failed. ' +
-                'Check the CI logs for details.'
-              );
-            }
+            const artifacts = '/tmp/artifacts';
 
-            // -------------------------
-            // Test coverage
-            // -------------------------
-            if (process.env.COVERAGE_RESULT === 'failure') {
-              errors.push(
-                '### Tests failed\n\n' +
-                'The test suite did not pass. Check the CI logs for details.'
-              );
-            }
-
-            // -------------------------
-            // PR metadata
-            // -------------------------
-            try {
-              const metadataErrors = JSON.parse(process.env.METADATA_ERRORS || '[]');
-              errors.push(...metadataErrors);
-            } catch (_) {
-              errors.push('### PR metadata check output could not be read');
-            }
-
-            // -------------------------
-            // Poll Codecov statuses
-            // Codecov posts its results asynchronously after the upload,
-            // so we poll the GitHub combined status endpoint every 10s
-            // for up to 5 minutes (30 attempts).
-            // -------------------------
-            const codecovContexts = ['codecov/project', 'codecov/patch'];
-            const maxAttempts = 30;
-            const intervalMs = 10_000;
-            let codecovTimedOut = false;
-
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-              const { data } = await github.rest.repos.getCombinedStatusForRef({
-                owner,
-                repo,
-                ref: sha,
-              });
-
-              const relevant = data.statuses.filter(s =>
-                codecovContexts.includes(s.context)
-              );
-              const allPresent = codecovContexts.every(ctx =>
-                relevant.some(s => s.context === ctx)
-              );
-              const anyPending = relevant.some(s => s.state === 'pending');
-
-              if (allPresent && !anyPending) {
-                const failed = relevant.filter(
-                  s => s.state === 'failure' || s.state === 'error'
-                );
-                for (const s of failed) {
-                  errors.push(
-                    `### Codecov check failed: \`${s.context}\`\n\n` +
-                    (s.description || 'Coverage threshold not met.')
-                  );
-                }
-                break;
+            // Read a file from the downloaded artifact tree, null if missing
+            const readArtifact = (artifactName, fileName) => {
+              try {
+                return fs.readFileSync(path.join(artifacts, artifactName, fileName), 'utf8').trim();
+              } catch {
+                return null;
               }
+            };
 
-              if (attempt === maxAttempts - 1) {
-                codecovTimedOut = true;
-              } else {
-                await new Promise(r => setTimeout(r, intervalMs));
-              }
-            }
+            // -- Code Guidelines section ---------------------------------------
+            const guidelineChecks = ['lint', 'format', 'build', 'typecheck'];
 
-            if (codecovTimedOut) {
-              errors.push(
-                '### Codecov status timed out\n\n' +
-                'Codecov did not report its result within 5 minutes. ' +
-                'Please check Codecov directly.'
-              );
-            }
-
-            // -------------------------
-            // Build review message
-            // -------------------------
-            let message = `${marker}\n`;
-
-            if (errors.length === 0) {
-              message += `# ✅ PR Quality Check Passed\n\nEverything looks good.`;
-            } else {
-              message += `# ❌ PR Quality Check Failed\n\n`;
-              message += `## Errors\n\n`;
-              message += errors.join('\n\n') + '\n\n';
-              message += `## Requirements\n`;
-              message += `- All code checks must pass (lint, format, build, typecheck)\n`;
-              message += `- Tests must pass\n`;
-              message += `- Codecov \`project\` and \`patch\` checks must pass\n`;
-              message += `- PR title must follow commitlint convention\n`;
-              message += `- All commits must follow commitlint convention\n`;
-              message += `- PR body must be at least 50 characters\n`;
-            }
-
-            // -------------------------
-            // Dismiss previous bot review
-            // -------------------------
-            const { data: reviews } = await github.rest.pulls.listReviews({
-              owner,
-              repo,
-              pull_number,
+            const guidelineResults = guidelineChecks.map(name => {
+              const raw = readArtifact(`guidelines-${name}`, 'check-result.txt');
+              return { name, passed: raw === 'success', available: raw !== null };
             });
 
-            const existing = reviews
-              .filter(r => r.user.type === 'Bot' && r.body?.includes(marker))
+            const guidelinesReq = guidelineResults
+              .map(({ name, passed, available }) =>
+                available
+                  ? `${passed ? '✅' : '❌'} \`${name}\``
+                  : `⚠️ \`${name}\` (result unavailable)`
+              )
+              .join('\n');
+
+            const guidelinesFailed = guidelineResults.some(r => !r.passed);
+
+            const guidelinesSection = [
+              '## 🔧 Code Guidelines',
+              '',
+              '### Requirements',
+              '',
+              guidelinesReq,
+              '',
+              '### Errors',
+              '',
+              guidelinesFailed
+                ? `One or more checks failed. Check the [CI logs](${runUrl}) for details.`
+                : '_No errors_',
+            ].join('\n');
+
+            // -- Tests section (built by verify-code-coverage) -----------------
+            const testsSection =
+              readArtifact('section-tests', 'section-tests.md') ??
+              '## 🧪 Tests\n\n_Section unavailable — check [CI logs](' + runUrl + ')._';
+
+            // -- PR Metadata section (built by verify-pr-metadata) -------------
+            const metadataSection =
+              readArtifact('section-metadata', 'section-metadata.md') ??
+              '## 📋 PR Metadata\n\n_Section unavailable — check [CI logs](' + runUrl + ')._';
+
+            // -- Codecov placeholder (filled in by pr-codecov-review.yml) ------
+            const codecovSection = [
+              CODECOV_START,
+              '## 📊 Codecov',
+              '',
+              '### Requirements',
+              '',
+              '⏳ `codecov/project`',
+              '⏳ `codecov/patch`',
+              '',
+              '### Errors',
+              '',
+              '_Awaiting Codecov report..._',
+              CODECOV_END,
+            ].join('\n');
+
+            // -- Overall header ------------------------------------------------
+            const hasNonCodecovErrors =
+              guidelinesFailed ||
+              process.env.COVERAGE_RESULT === 'failure' ||
+              process.env.METADATA_RESULT  === 'failure';
+
+            // ⏳ = waiting for codecov, ❌ = already failing without it
+            const headerIcon = hasNonCodecovErrors ? '❌' : '⏳';
+
+            // -- Assemble full review body -------------------------------------
+            const message = [
+              MARKER,
+              SHA_MARKER,
+              '',
+              `# ${headerIcon} PR Validation Status`,
+              '',
+              guidelinesSection,
+              '',
+              testsSection,
+              '',
+              metadataSection,
+              '',
+              codecovSection,
+            ].join('\n');
+
+            // -- Dismiss previous bot review if any ---------------------------
+            const { data: reviews } = await github.rest.pulls.listReviews({ owner, repo, pull_number });
+            const previous = reviews
+              .filter(r => r.user.type === 'Bot' && r.body?.includes(MARKER))
               .reverse()[0];
 
-            if (existing && existing.state !== 'DISMISSED') {
+            if (previous && previous.state !== 'DISMISSED') {
               await github.rest.pulls.dismissReview({
-                owner,
-                repo,
-                pull_number,
-                review_id: existing.id,
+                owner, repo, pull_number,
+                review_id: previous.id,
                 message: 'Superseded by a new quality check.',
               });
             }
 
-            // -------------------------
-            // Post new review
-            // -------------------------
-            const event = errors.length === 0 ? 'APPROVE' : 'REQUEST_CHANGES';
+            // -- Post review ---------------------------------------------------
+            // REQUEST_CHANGES if non-codecov errors already found;
+            // COMMENT while waiting for Codecov (pr-codecov-review.yml will APPROVE or REQUEST_CHANGES later)
+            const event = hasNonCodecovErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+            await github.rest.pulls.createReview({ owner, repo, pull_number, body: message, event });
 
-            await github.rest.pulls.createReview({
-              owner,
-              repo,
-              pull_number,
-              body: message,
-              event,
-            });
-
-            if (errors.length > 0) {
+            if (hasNonCodecovErrors) {
               core.setFailed('PR quality checks failed');
             }
