@@ -6,7 +6,7 @@ test.group('check "Hello" root route', () => {
 
     response.assertStatus(200)
     response.assertBody({
-      hello: 'world',
+      hello: 'broken',
     })
   })
 })
