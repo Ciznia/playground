@@ -10,3 +10,4 @@ test.group('check "Hello" root route', () => {
     })
   })
 })
+// ci-test: happy path
