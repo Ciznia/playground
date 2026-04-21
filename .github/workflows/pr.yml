@@ -98,6 +98,7 @@ jobs:
         if: always()
         uses: codecov/codecov-action@v6
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./virtuotech-api/coverage/lcov.info
 
       - name: Build section
