@@ -5,7 +5,7 @@ export default {
     {
       rules: {
         'scope-jira-id': ({ scope }) => {
-          const regex = /^\[VS-\d+\]/
+          const regex = /^\[VS-\d+\]$/
           if (!scope) {
             return [false, 'Scope is required and must match "[VS-<number>]"']
           }
