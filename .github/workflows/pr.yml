@@ -180,7 +180,7 @@ jobs:
             // --- Validate PR title ---
             try {
               execSync(
-                `echo ${JSON.stringify(pr.title)} | npx --no-install commitlint`,
+                `echo ${JSON.stringify(pr.title)} | npx --no-install commitlint --color false`,
                 { stdio: 'pipe', cwd }
               );
               checks.find(c => c.key === 'title').passed = true;
@@ -194,7 +194,7 @@ jobs:
             // --- Validate commits ---
             try {
               execSync(
-                `npx --no-install commitlint --from ${pr.base.sha} --to ${pr.head.sha}`,
+                `npx --no-install commitlint --from ${pr.base.sha} --to ${pr.head.sha} --color false`,
                 { stdio: 'pipe', cwd }
               );
               checks.find(c => c.key === 'commits').passed = true;
