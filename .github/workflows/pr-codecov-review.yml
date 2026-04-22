@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      actions: read
-
+      checks: read
     steps:
       - name: Update Codecov section and re-post review
         uses: actions/github-script@v9
