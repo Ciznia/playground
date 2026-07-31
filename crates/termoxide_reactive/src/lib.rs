@@ -3,6 +3,8 @@
 //! This crate exposes TermOxide's reactivity primitives,
 //! modelled after React / SolidJS.
 //!
+//! playground coverage-pipeline test: no functional change.
+//!
 //! ## Overview of primitives
 //!
 //! |Type|Role|
