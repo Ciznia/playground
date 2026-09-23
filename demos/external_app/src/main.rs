@@ -91,6 +91,12 @@ impl App for AppState {
                 "Controls: any key counts, q or Ctrl-C quits".to_string(),
                 Style::default().fg(Color::Green),
             ),
+            Self::line(
+                viewport,
+                3,
+                format!("pid: {}", std::process::id()),
+                Style::default().fg(Color::Magenta),
+            ),
         ]
         .into_iter()
         .flatten()
