@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["logic"]
+
+[package]
+name = "wasm_app_framework"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+termoxide_hot_reload = { path = "../../crates/termoxide_hot_reload" }
