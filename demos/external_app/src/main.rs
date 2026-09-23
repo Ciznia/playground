@@ -4,6 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
 };
+use serde::{Deserialize, Serialize};
 use termoxide::{App, run_with_app};
 use termoxide_event::event::{Event, KeyCode, KeyModifiers};
 use termoxide_reactive::Signal;
@@ -17,6 +18,16 @@ struct AppState {
     count: Signal<u32>,
     ticks: Signal<u64>,
     last_key: Signal<String>,
+}
+
+/// What [`AppState::snapshot`] persists across a hot reload — everything
+/// `AppState` holds except the signal machinery itself, since a fresh
+/// process rebuilds that from scratch and only the values need to survive.
+#[derive(Serialize, Deserialize)]
+struct Snapshot {
+    count: u32,
+    ticks: u64,
+    last_key: String,
 }
 
 impl AppState {
@@ -91,12 +102,42 @@ impl App for AppState {
                 "Controls: any key counts, q or Ctrl-C quits".to_string(),
                 Style::default().fg(Color::Green),
             ),
+            Self::line(
+                viewport,
+                3,
+                format!("pid: {}", std::process::id()),
+                Style::default().fg(Color::Magenta),
+            ),
         ]
         .into_iter()
         .flatten()
         .collect();
 
         el(Container).area(viewport).children(children).build()
+    }
+
+    fn snapshot(&self) -> Vec<u8> {
+        let snapshot = Snapshot {
+            count: self.count.get_untracked(),
+            ticks: self.ticks.get_untracked(),
+            last_key: self.last_key.get_untracked(),
+        };
+        // `unwrap_or_default` over erroring: a snapshot this app can't
+        // encode is equivalent to having nothing to persist, not a reason
+        // to fail the shutdown that's already in progress.
+        serde_json::to_vec(&snapshot).unwrap_or_default()
+    }
+
+    fn restore(&self, snapshot: &[u8]) {
+        // A malformed or empty snapshot (no previous run, or one from a
+        // build old enough to have a different `Snapshot` shape) just means
+        // starting fresh, exactly like a plain `cargo run` — not an error.
+        let Ok(snapshot) = serde_json::from_slice::<Snapshot>(snapshot) else {
+            return;
+        };
+        self.count.set(snapshot.count);
+        self.ticks.set(snapshot.ticks);
+        self.last_key.set(snapshot.last_key);
     }
 }
 

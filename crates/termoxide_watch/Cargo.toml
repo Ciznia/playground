@@ -1,0 +1,15 @@
+[package]
+name = "termoxide_watch"
+description = "Dev-time supervisor: rebuilds a TermOxide app on source changes and respawns it"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "termoxide-watch"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+ctrlc = "3"
+notify = "6"
+serde_json = "1"

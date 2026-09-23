@@ -9,6 +9,8 @@ edition = "2024"
 any_spawner = { version = "0.3", features = ["tokio"] }
 color-eyre = "0.6"
 ratatui = { version = "0.26", features = ["crossterm"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 termoxide = { path = "../../crates/termoxide" }
 termoxide_event = { path = "../../crates/termoxide_event" }
 termoxide_reactive = { path = "../../crates/termoxide_reactive" }

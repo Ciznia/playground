@@ -75,6 +75,23 @@ pub trait App {
     ///
     /// Called only on frames that actually repaint.
     fn build_view(&self, viewport: Rect) -> ViewNode;
+
+    /// Serialize state that should survive a hot reload.
+    ///
+    /// Only ever called when a supervising dev tool has opted a run into
+    /// state persistence (see [`RELOAD_STATE_ENV`]) — a plain `cargo run`
+    /// never calls this, so the default no-op costs nothing outside that
+    /// workflow. Apps that want their state to survive a reload override
+    /// this (and [`restore`](Self::restore)) with their own encoding —
+    /// `termoxide` treats the bytes as opaque.
+    fn snapshot(&self) -> Vec<u8> { Vec::new() }
+
+    /// Restore state from a previous [`snapshot`](Self::snapshot).
+    ///
+    /// Called once at startup, before the first frame, only when hot-reload
+    /// state persistence is active *and* a previous run actually left a
+    /// snapshot. Default: no-op.
+    fn restore(&self, _snapshot: &[u8]) {}
 }
 
 /// A non-blocking source of input events.
@@ -159,6 +176,12 @@ fn pump_events<A: App, E: EventSource>(app: &A, events: &E) -> bool {
 /// Sets up the reactive owner, the alternate screen and the input reader, drives
 /// the loop, then restores the terminal before returning.
 ///
+/// If [`RELOAD_STATE_ENV`] is set (a supervising dev tool opted this run into
+/// hot-reload state persistence), a snapshot left by a previous run is
+/// restored before the first frame, and — only when this run itself stops
+/// *because* the supervisor asked it to, not on a normal quit — a fresh one
+/// is written on the way out. See [`App::snapshot`]/[`App::restore`].
+///
 /// # Errors
 ///
 /// Returns an error if the terminal cannot be set up, if a frame fails to
@@ -166,6 +189,12 @@ fn pump_events<A: App, E: EventSource>(app: &A, events: &E) -> bool {
 pub async fn run_with_app<A: App + Clone + 'static>(app: A) -> Result<()> {
     let owner = termoxide_reactive::Owner::new();
     owner.set();
+
+    if let Some(path) = reload_state_path()
+        && let Ok(bytes) = std::fs::read(&path)
+    {
+        app.restore(&bytes);
+    }
 
     let redraw = Arc::new(Redraw::default());
     let _redraw_effect = {
@@ -182,20 +211,83 @@ pub async fn run_with_app<A: App + Clone + 'static>(app: A) -> Result<()> {
     let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut renderer = Renderer::new(terminal)?;
 
-    let result = drive(&app, &mut renderer, &events, &redraw).await;
+    let outcome = drive(&app, &mut renderer, &events, &redraw).await;
+
+    // Only a reload-triggered stop persists state: a normal quit (the user
+    // pressed 'q', say) means the app is genuinely done, not making way for
+    // a rebuild, so there is nothing to hand off to a next run.
+    if matches!(outcome, Ok(StopReason::Reload))
+        && let Some(path) = reload_state_path()
+    {
+        let _ = std::fs::write(&path, app.snapshot());
+    }
 
     // Restore the terminal before reporting: the reader thread owns raw mode,
     // and its own failure is a likely reason the loop stopped in the first
     // place, so its result is worth surfacing rather than discarding.
     let teardown = events.teardown();
-    result?;
+    outcome?;
     teardown?;
     Ok(())
 }
 
+/// Env var a supervising dev tool (e.g. `termoxide_watch`) sets to ask the
+/// running app to shut down gracefully, so it can be rebuilt and respawned
+/// with a fresh binary. Absent under a plain `cargo run`, so this costs
+/// nothing outside a hot-reload session — see [`ReloadWatcher`].
+const RELOAD_SENTINEL_ENV: &str = "TERMOXIDE_RELOAD_SENTINEL";
+
+/// Env var a supervising dev tool sets to a file path when it wants this
+/// run's state to survive a reload — its mere presence is the opt-in.
+/// `termoxide_watch` only sets it when started with `--persist-state`, so a
+/// plain `cargo run`, and even a `termoxide-watch` session without that
+/// flag, never touch the filesystem for this at all.
+pub const RELOAD_STATE_ENV: &str = "TERMOXIDE_RELOAD_STATE";
+
+/// Why the driving loop in [`drive`] returned.
+///
+/// Both are a clean stop — the distinction exists only so
+/// [`run_with_app`] knows whether persisting state (see
+/// [`RELOAD_STATE_ENV`]) makes sense: it does for a reload, not for a
+/// genuine quit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopReason {
+    /// `App::handle_event` returned `true`.
+    Quit,
+    /// A supervisor's sentinel asked this process to make way for a rebuild.
+    Reload,
+}
+
+fn reload_state_path() -> Option<std::path::PathBuf> {
+    std::env::var_os(RELOAD_STATE_ENV).map(std::path::PathBuf::from)
+}
+
+/// Polls for a supervisor's shutdown request during hot reload.
+///
+/// A supervising process writes [`RELOAD_SENTINEL_ENV`]'s path once the
+/// rebuilt binary is ready, then waits for this process to exit before
+/// spawning it. Checking for the file's existence (rather than, say, a
+/// socket) keeps the child side dependency-free and identical on every
+/// platform.
+///
+/// State is *not* carried across the swap through this mechanism — it only
+/// signals that a swap is happening. See [`RELOAD_STATE_ENV`] for the
+/// separate, independently opt-in state snapshot.
+struct ReloadWatcher {
+    sentinel: Option<std::path::PathBuf>,
+}
+
+impl ReloadWatcher {
+    /// Reads [`RELOAD_SENTINEL_ENV`] once. `None` when unset, so
+    /// [`requested`](Self::requested) is a single cheap branch per tick.
+    fn from_env() -> Self { Self { sentinel: std::env::var_os(RELOAD_SENTINEL_ENV).map(std::path::PathBuf::from) } }
+
+    fn requested(&self) -> bool { self.sentinel.as_deref().is_some_and(std::path::Path::exists) }
+}
+
 /// The loop proper, generic over the backend and the event source so it can be
 /// driven without a terminal.
-async fn drive<A, B, E>(app: &A, renderer: &mut Renderer<B>, events: &E, redraw: &Redraw) -> Result<()>
+async fn drive<A, B, E>(app: &A, renderer: &mut Renderer<B>, events: &E, redraw: &Redraw) -> Result<StopReason>
 where
     A: App,
     B: Backend,
@@ -203,6 +295,7 @@ where
 {
     let mut pacer = FramePacer::new(Instant::now(), MIN_FRAME);
     let mut viewport = renderer.viewport();
+    let reload = ReloadWatcher::from_env();
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     let mut input = tokio::time::interval(INPUT_POLL);
@@ -215,11 +308,18 @@ where
         tokio::select! {
             _ = input.tick() => {
                 if pump_events(app, events) {
-                    return Ok(());
+                    return Ok(StopReason::Quit);
                 }
             }
             _ = ticker.tick() => {
                 app.on_tick();
+
+                // Checked on the tick cadence rather than a dedicated timer:
+                // a 100ms worst case is unnoticeable for a rebuild-triggered
+                // shutdown, and it avoids adding another `select!` arm.
+                if reload.requested() {
+                    return Ok(StopReason::Reload);
+                }
 
                 // A resize raises no event and writes no signal, so it is only
                 // observable by asking the terminal.
