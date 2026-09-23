@@ -1,0 +1,17 @@
+[package]
+name = "termoxide_watch_wx"
+description = "Dev-time supervisor: same as termoxide_watch, but file-watching is done by the watchexec crate instead of a hand-rolled notify+debounce loop"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "termoxide-watch-wx"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+ctrlc = "3"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+watchexec = "8"
+watchexec-events = "6"

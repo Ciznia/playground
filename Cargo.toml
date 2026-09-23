@@ -8,6 +8,7 @@ members = [
     "crates/termoxide_event",
     "crates/termoxide_rendering",
     "crates/cargo-extract",
+    "crates/termoxide_watch_wx",
 ]
 
 [profile.release]
