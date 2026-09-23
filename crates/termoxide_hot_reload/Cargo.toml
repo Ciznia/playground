@@ -1,0 +1,12 @@
+[package]
+name = "termoxide_hot_reload"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+hot-lib-reloader = "0.8"
+notify = "6"
+ratatui = { version = "0.26", features = ["crossterm"] }
+termoxide_event = { path = "../termoxide_event" }
+termoxide_rendering = { path = "../termoxide_rendering" }

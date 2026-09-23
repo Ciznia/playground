@@ -1,0 +1,12 @@
+[package]
+name = "lib"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "dylib"]
+
+[dependencies]
+ratatui = { version = "0.26", features = ["crossterm"] }
+termoxide_event = { path = "../../../crates/termoxide_event" }
+termoxide_rendering = { path = "../../../crates/termoxide_rendering" }
