@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["lib"]
+
+[package]
+name = "hot_lib_reloader_app_framework_persist"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+hot-lib-reloader = "0.8"
+lib = { path = "lib" }
+ratatui = { version = "0.26", features = ["crossterm"] }
+termoxide_event = { path = "../../crates/termoxide_event" }
+termoxide_hot_reload = { path = "../../crates/termoxide_hot_reload" }
+termoxide_rendering = { path = "../../crates/termoxide_rendering" }
