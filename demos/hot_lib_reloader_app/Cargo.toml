@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["lib"]
+
+[package]
+name = "hot_lib_reloader_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+hot-lib-reloader = "0.8"
+lib = { path = "lib" }
+notify = "6"
+ratatui = { version = "0.26", features = ["crossterm"] }
+serde_json = "1"
+termoxide_event = { path = "../../crates/termoxide_event" }
+termoxide_reactive = { path = "../../crates/termoxide_reactive" }
+termoxide_rendering = { path = "../../crates/termoxide_rendering" }
