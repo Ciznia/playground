@@ -193,6 +193,35 @@ pub async fn run_with_app<A: App + Clone + 'static>(app: A) -> Result<()> {
     Ok(())
 }
 
+/// Env var a supervising dev tool (e.g. `termoxide_watch`) sets to ask the
+/// running app to shut down gracefully, so it can be rebuilt and respawned
+/// with a fresh binary. Absent under a plain `cargo run`, so this costs
+/// nothing outside a hot-reload session — see [`ReloadWatcher`].
+const RELOAD_SENTINEL_ENV: &str = "TERMOXIDE_RELOAD_SENTINEL";
+
+/// Polls for a supervisor's shutdown request during hot reload.
+///
+/// A supervising process writes [`RELOAD_SENTINEL_ENV`]'s path once the
+/// rebuilt binary is ready, then waits for this process to exit before
+/// spawning it. Checking for the file's existence (rather than, say, a
+/// socket) keeps the child side dependency-free and identical on every
+/// platform.
+///
+/// No state is preserved across the swap through this mechanism — the new
+/// process starts from scratch. See the `hot_reload_process_supervisor_persist`
+/// draft worktree for the opt-in state snapshot built on top of this one.
+struct ReloadWatcher {
+    sentinel: Option<std::path::PathBuf>,
+}
+
+impl ReloadWatcher {
+    /// Reads [`RELOAD_SENTINEL_ENV`] once. `None` when unset, so
+    /// [`requested`](Self::requested) is a single cheap branch per tick.
+    fn from_env() -> Self { Self { sentinel: std::env::var_os(RELOAD_SENTINEL_ENV).map(std::path::PathBuf::from) } }
+
+    fn requested(&self) -> bool { self.sentinel.as_deref().is_some_and(std::path::Path::exists) }
+}
+
 /// The loop proper, generic over the backend and the event source so it can be
 /// driven without a terminal.
 async fn drive<A, B, E>(app: &A, renderer: &mut Renderer<B>, events: &E, redraw: &Redraw) -> Result<()>
@@ -203,6 +232,7 @@ where
 {
     let mut pacer = FramePacer::new(Instant::now(), MIN_FRAME);
     let mut viewport = renderer.viewport();
+    let reload = ReloadWatcher::from_env();
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     let mut input = tokio::time::interval(INPUT_POLL);
@@ -220,6 +250,13 @@ where
             }
             _ = ticker.tick() => {
                 app.on_tick();
+
+                // Checked on the tick cadence rather than a dedicated timer:
+                // a 100ms worst case is unnoticeable for a rebuild-triggered
+                // shutdown, and it avoids adding another `select!` arm.
+                if reload.requested() {
+                    return Ok(());
+                }
 
                 // A resize raises no event and writes no signal, so it is only
                 // observable by asking the terminal.
